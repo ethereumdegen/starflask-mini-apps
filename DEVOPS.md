@@ -109,7 +109,7 @@ Fill in `.env` with the values from the seed output:
 
 ```env
 STARFLASK_API_URL=http://localhost:8080
-STARFLASK_SECRET_KEY=<same value as Starflask's STARFLASK_SECRET_KEY>
+STARFLASK_API_KEY=sk_<your api key from step 4>
 STARFLASK_AGENT_ID=<uuid printed by seed.js>
 PORT=3001
 ```

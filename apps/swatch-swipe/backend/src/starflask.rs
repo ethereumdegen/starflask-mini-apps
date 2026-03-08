@@ -1,24 +1,20 @@
-use hmac::{Hmac, Mac};
 use reqwest::Client;
 use serde_json::Value;
-use sha2::Sha256;
 use std::time::Duration;
 use tracing::{info, warn};
 
 use crate::models::Palette;
 
-type HmacSha256 = Hmac<Sha256>;
-
 #[derive(Clone)]
 pub struct StarflaskClient {
     pub api_url: String,
-    pub secret_key: String,
+    pub api_key: String,
     pub agent_id: String,
     client: Client,
 }
 
 impl StarflaskClient {
-    pub fn new(api_url: String, secret_key: String, agent_id: String) -> Self {
+    pub fn new(api_url: String, api_key: String, agent_id: String) -> Self {
         let client = Client::builder()
             .timeout(Duration::from_secs(90))
             .build()
@@ -26,48 +22,41 @@ impl StarflaskClient {
 
         Self {
             api_url,
-            secret_key,
+            api_key,
             agent_id,
             client,
         }
     }
 
-    fn compute_auth_token(&self) -> String {
-        let mut mac = HmacSha256::new_from_slice(self.secret_key.as_bytes())
-            .expect("HMAC can take key of any size");
-        mac.update(b"starflask-worker-auth");
-        let result = mac.finalize();
-        hex::encode(result.into_bytes())
-    }
-
     pub async fn fire_event(&self, premise: &str) -> Result<String, String> {
-        let token = self.compute_auth_token();
-        let url = format!("{}/api/worker/fire_event", self.api_url);
+        let url = format!(
+            "{}/api/agents/{}/fire_hook",
+            self.api_url, self.agent_id
+        );
 
         let payload = serde_json::json!({
-            "agent_id": self.agent_id,
             "event": "generate_palette",
             "payload": {
                 "premise": premise
             }
         });
 
-        info!("Firing event to Starflask: {}", url);
+        info!("Firing hook to Starflask: {}", url);
 
         let resp = self
             .client
             .post(&url)
-            .bearer_auth(&token)
+            .bearer_auth(&self.api_key)
             .json(&payload)
             .send()
             .await
-            .map_err(|e| format!("Failed to fire event: {}", e))?;
+            .map_err(|e| format!("Failed to fire hook: {}", e))?;
 
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
             return Err(format!(
-                "Fire event failed with status {}: {}",
+                "Fire hook failed with status {}: {}",
                 status, body
             ));
         }
@@ -75,11 +64,11 @@ impl StarflaskClient {
         let body: Value = resp
             .json()
             .await
-            .map_err(|e| format!("Failed to parse fire_event response: {}", e))?;
+            .map_err(|e| format!("Failed to parse fire_hook response: {}", e))?;
 
         let session_id = body["id"]
             .as_str()
-            .ok_or_else(|| "No session id in fire_event response".to_string())?
+            .ok_or_else(|| "No session id in fire_hook response".to_string())?
             .to_string();
 
         info!("Got session_id: {}", session_id);
@@ -87,10 +76,9 @@ impl StarflaskClient {
     }
 
     pub async fn poll_session(&self, session_id: &str) -> Result<Vec<Palette>, String> {
-        let token = self.compute_auth_token();
         let url = format!(
-            "{}/api/worker/sessions/{}",
-            self.api_url, session_id
+            "{}/api/agents/{}/sessions/{}",
+            self.api_url, self.agent_id, session_id
         );
 
         let max_attempts = 30;
@@ -102,7 +90,7 @@ impl StarflaskClient {
             let resp = self
                 .client
                 .get(&url)
-                .bearer_auth(&token)
+                .bearer_auth(&self.api_key)
                 .send()
                 .await
                 .map_err(|e| format!("Failed to poll session: {}", e))?;
@@ -148,8 +136,6 @@ impl StarflaskClient {
 }
 
 fn extract_palettes(session: &Value) -> Result<Vec<Palette>, String> {
-    // Try to find palettes in the session result/output
-    // The worker response might be nested in different ways
     let result = session
         .get("result")
         .or_else(|| session.get("output"))

@@ -39,12 +39,12 @@ async fn main() {
 
     let starflask_client = match (
         std::env::var("STARFLASK_API_URL"),
-        std::env::var("STARFLASK_SECRET_KEY"),
+        std::env::var("STARFLASK_API_KEY"),
         std::env::var("STARFLASK_AGENT_ID"),
     ) {
-        (Ok(api_url), Ok(secret_key), Ok(agent_id)) => {
+        (Ok(api_url), Ok(api_key), Ok(agent_id)) => {
             info!("Starflask integration enabled: {}", api_url);
-            Some(StarflaskClient::new(api_url, secret_key, agent_id))
+            Some(StarflaskClient::new(api_url, api_key, agent_id))
         }
         _ => {
             info!("Starflask integration disabled (missing env vars), using mock mode");
