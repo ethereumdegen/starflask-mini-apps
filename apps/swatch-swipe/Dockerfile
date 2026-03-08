@@ -7,7 +7,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # Stage 2: Build backend
-FROM rust:1.83-slim AS backend-build
+FROM rust:1.85-slim AS backend-build
 RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
 WORKDIR /app/backend
 COPY backend/Cargo.toml backend/Cargo.lock* ./
