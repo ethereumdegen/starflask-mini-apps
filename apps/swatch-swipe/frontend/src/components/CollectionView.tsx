@@ -1,4 +1,4 @@
-import { SavedPalette } from '../types';
+import type { SavedPalette } from '../types';
 import { PaletteCard } from './PaletteCard';
 import { deletePalette } from '../api';
 

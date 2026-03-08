@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { generatePalettes, savePalette } from '../api';
-import { Palette, SavedPalette } from '../types';
+import type { Palette, SavedPalette } from '../types';
 import { PaletteCard } from './PaletteCard';
 import { motion, AnimatePresence } from 'framer-motion';
 

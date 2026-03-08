@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { Palette, SavedPalette } from './types';
+import type { Palette, SavedPalette } from './types';
 
 const api = axios.create({ baseURL: '/api' });
 

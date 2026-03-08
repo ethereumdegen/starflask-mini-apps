@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { GeneratorView } from './components/GeneratorView';
 import { CollectionView } from './components/CollectionView';
-import { SavedPalette } from './types';
+import type { SavedPalette } from './types';
 
 function App() {
   const [view, setView] = useState<'generator' | 'collection'>('generator');
