@@ -100,6 +100,21 @@ export class Starflask {
     });
   }
 
+  /**
+   * Provision a full agent pack (soul + personas + pack definition) and install it on an agent.
+   * This creates everything in Axoniac and installs it in one call — no Axoniac CLI needed.
+   *
+   * @param {string} agentId
+   * @param {{ soul: object, personas: object[], pack: object }} packDefinition
+   * @returns {Promise<{ agent_id: string, content_hash: string, provision_result: object }>}
+   */
+  async provisionPack(agentId, packDefinition) {
+    return this.#request(`/agents/${agentId}/provision-pack`, {
+      method: "POST",
+      body: JSON.stringify(packDefinition),
+    });
+  }
+
   // ── Hooks ───────────────────────────────────────────────
 
   /** Get available hooks for an agent. @param {string} agentId */
