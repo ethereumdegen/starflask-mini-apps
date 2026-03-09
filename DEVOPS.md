@@ -87,9 +87,17 @@ curl -s -X POST http://localhost:8080/api/auth/api-keys \
 
 ### 5. Seed the Swatch Swipe agent
 
+The easiest way is through Claude Code — just tell it:
+
+> run seed using starflask api key sk_eb4ba3...
+
+Claude Code runs the Rust seed binary and returns the agent ID, which you add to your `.env`.
+
+Or run it directly:
+
 ```bash
-cd ~/ai/starflask-miniapps
-STARFLASK_API_KEY=sk_... node apps/swatch-swipe/seed.js
+cd ~/ai/starflask-miniapps/apps/swatch-swipe/backend
+STARFLASK_API_KEY=sk_... STARFLASK_API_URL=https://starflask.com/api cargo run --bin seed
 ```
 
 This will:
@@ -110,7 +118,7 @@ Fill in `.env` with the values from the seed output:
 ```env
 STARFLASK_API_URL=http://localhost:8080
 STARFLASK_API_KEY=sk_<your api key from step 4>
-STARFLASK_AGENT_ID=<uuid printed by seed.js>
+STARFLASK_AGENT_ID=<uuid printed by seed>
 PORT=3001
 ```
 
@@ -145,9 +153,9 @@ npm run dev
 ## Adding a new mini-app
 
 1. Create `apps/your-app/backend/` (Rust/Axum) and `apps/your-app/frontend/` (React/Vite)
-2. Define your agent pack inline in `apps/your-app/seed.js` (see `apps/swatch-swipe/seed.js`)
-3. Run `STARFLASK_API_KEY=sk_... node apps/your-app/seed.js`
-4. Use the `starflask` npm package (`npx starflask` / `import { Starflask } from "starflask"`) for API calls
+2. Define your agent pack inline in `apps/your-app/backend/src/seed.rs` (see `apps/swatch-swipe/backend/src/seed.rs`)
+3. Run `STARFLASK_API_KEY=sk_... cargo run --bin seed` or tell Claude Code to run it
+4. Use the `starflask` Rust crate for API calls
 5. See [AXONIAC_AGENT_SEED.md](./AXONIAC_AGENT_SEED.md) for pack authoring guide
 
 ## Ports
@@ -161,7 +169,7 @@ npm run dev
 
 ## Troubleshooting
 
-**`UNAUTHORIZED` from seed.js** — API key is wrong or the `user_api_keys` migration hasn't run. Run `cargo run --bin migrate` in `sf-backend`.
+**`UNAUTHORIZED` from seed** — API key is wrong or the `user_api_keys` migration hasn't run. Run `cargo run --bin migrate` in `sf-backend`.
 
 **`PAYMENT_REQUIRED` from provision-pack** — User has no active subscription and zero credits. Grant credits via admin: `POST /api/admin/credits/grant { "user_id": "...", "amount": 100 }`.
 
