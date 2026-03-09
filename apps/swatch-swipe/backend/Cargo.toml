@@ -3,6 +3,14 @@ name = "swatch-swipe-backend"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "swatch-swipe-backend"
+path = "src/main.rs"
+
+[[bin]]
+name = "seed"
+path = "src/seed.rs"
+
 [dependencies]
 axum = "0.8"
 tokio = { version = "1", features = ["full"] }
