@@ -54,12 +54,20 @@ fn extract_palettes(result: &Option<serde_json::Value>) -> Result<Vec<Palette>, 
     // Prefer structured_data (report_result's machine-readable output)
     if let Some(data) = result.get("structured_data") {
         if !data.is_null() {
-            if let Ok(palettes) = serde_json::from_value::<Vec<Palette>>(data.clone()) {
-                return Ok(palettes);
-            }
-            if let Some(p) = data.get("palettes") {
-                if let Ok(palettes) = serde_json::from_value::<Vec<Palette>>(p.clone()) {
+            // structured_data may be a JSON string that needs parsing
+            let parsed = if let Some(s) = data.as_str() {
+                serde_json::from_str::<serde_json::Value>(s).ok()
+            } else {
+                Some(data.clone())
+            };
+            if let Some(parsed) = parsed {
+                if let Ok(palettes) = serde_json::from_value::<Vec<Palette>>(parsed.clone()) {
                     return Ok(palettes);
+                }
+                if let Some(p) = parsed.get("palettes") {
+                    if let Ok(palettes) = serde_json::from_value::<Vec<Palette>>(p.clone()) {
+                        return Ok(palettes);
+                    }
                 }
             }
         }
