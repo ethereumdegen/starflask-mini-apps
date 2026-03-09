@@ -147,7 +147,7 @@ npm run dev
 1. Create `apps/your-app/backend/` (Rust/Axum) and `apps/your-app/frontend/` (React/Vite)
 2. Define your agent pack inline in `apps/your-app/seed.js` (see `apps/swatch-swipe/seed.js`)
 3. Run `STARFLASK_API_KEY=sk_... node apps/your-app/seed.js`
-4. Use the `starflask` npm package (`packages/starflask/`) for API calls
+4. Use the `starflask` npm package (`npx starflask` / `import { Starflask } from "starflask"`) for API calls
 5. See [AXONIAC_AGENT_SEED.md](./AXONIAC_AGENT_SEED.md) for pack authoring guide
 
 ## Ports

@@ -44,7 +44,7 @@ async fn main() {
     ) {
         (Ok(api_url), Ok(api_key), Ok(agent_id)) => {
             info!("Starflask integration enabled: {}", api_url);
-            Some(StarflaskClient::new(api_url, api_key, agent_id))
+            Some(StarflaskClient::new(&api_url, &api_key, &agent_id))
         }
         _ => {
             info!("Starflask integration disabled (missing env vars), using mock mode");

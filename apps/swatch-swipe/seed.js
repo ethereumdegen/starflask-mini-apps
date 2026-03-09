@@ -12,7 +12,7 @@
  *   STARFLASK_API_KEY=sk_... node seed.js --test
  */
 
-import { Starflask } from "../../packages/starflask/index.js";
+import { Starflask } from "starflask";
 
 // ── Agent Pack Definition (inline) ──────────────────────────
 

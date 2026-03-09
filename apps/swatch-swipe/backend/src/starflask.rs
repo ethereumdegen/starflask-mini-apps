@@ -1,177 +1,87 @@
-use reqwest::Client;
-use serde_json::Value;
-use std::time::Duration;
-use tracing::{info, warn};
+use starflask::Starflask;
+use uuid::Uuid;
 
 use crate::models::Palette;
 
 #[derive(Clone)]
 pub struct StarflaskClient {
-    pub api_url: String,
-    pub api_key: String,
-    pub agent_id: String,
-    client: Client,
+    sf: Starflask,
+    agent_id: Uuid,
 }
 
 impl StarflaskClient {
-    pub fn new(api_url: String, api_key: String, agent_id: String) -> Self {
-        let client = Client::builder()
-            .timeout(Duration::from_secs(90))
-            .build()
-            .expect("Failed to create HTTP client");
+    pub fn new(api_url: &str, api_key: &str, agent_id: &str) -> Self {
+        let base_url = format!("{}/api", api_url.trim_end_matches('/'));
+        let sf = Starflask::new(api_key, Some(&base_url))
+            .expect("Failed to create Starflask client");
+        let agent_id: Uuid = agent_id.parse().expect("Invalid STARFLASK_AGENT_ID");
 
-        Self {
-            api_url,
-            api_key,
-            agent_id,
-            client,
-        }
-    }
-
-    pub async fn fire_event(&self, premise: &str) -> Result<String, String> {
-        let url = format!(
-            "{}/api/agents/{}/fire_hook",
-            self.api_url, self.agent_id
-        );
-
-        let payload = serde_json::json!({
-            "event": "generate_palette",
-            "payload": {
-                "premise": premise
-            }
-        });
-
-        info!("Firing hook to Starflask: {}", url);
-
-        let resp = self
-            .client
-            .post(&url)
-            .bearer_auth(&self.api_key)
-            .json(&payload)
-            .send()
-            .await
-            .map_err(|e| format!("Failed to fire hook: {}", e))?;
-
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            return Err(format!(
-                "Fire hook failed with status {}: {}",
-                status, body
-            ));
-        }
-
-        let body: Value = resp
-            .json()
-            .await
-            .map_err(|e| format!("Failed to parse fire_hook response: {}", e))?;
-
-        let session_id = body["id"]
-            .as_str()
-            .ok_or_else(|| "No session id in fire_hook response".to_string())?
-            .to_string();
-
-        info!("Got session_id: {}", session_id);
-        Ok(session_id)
-    }
-
-    pub async fn poll_session(&self, session_id: &str) -> Result<Vec<Palette>, String> {
-        let url = format!(
-            "{}/api/agents/{}/sessions/{}",
-            self.api_url, self.agent_id, session_id
-        );
-
-        let max_attempts = 30;
-        let poll_interval = Duration::from_secs(2);
-
-        for attempt in 1..=max_attempts {
-            info!("Polling session {} (attempt {}/{})", session_id, attempt, max_attempts);
-
-            let resp = self
-                .client
-                .get(&url)
-                .bearer_auth(&self.api_key)
-                .send()
-                .await
-                .map_err(|e| format!("Failed to poll session: {}", e))?;
-
-            if !resp.status().is_success() {
-                let status = resp.status();
-                let body = resp.text().await.unwrap_or_default();
-                warn!("Poll attempt {} failed: {} - {}", attempt, status, body);
-                tokio::time::sleep(poll_interval).await;
-                continue;
-            }
-
-            let body: Value = resp
-                .json()
-                .await
-                .map_err(|e| format!("Failed to parse session response: {}", e))?;
-
-            let status = body["status"].as_str().unwrap_or("unknown");
-
-            match status {
-                "completed" => {
-                    info!("Session completed, extracting palettes");
-                    return extract_palettes(&body);
-                }
-                "failed" => {
-                    let error = body["error"].as_str().unwrap_or("Unknown error");
-                    return Err(format!("Session failed: {}", error));
-                }
-                _ => {
-                    info!("Session status: {}, continuing to poll...", status);
-                    tokio::time::sleep(poll_interval).await;
-                }
-            }
-        }
-
-        Err("Timed out waiting for session to complete".to_string())
+        Self { sf, agent_id }
     }
 
     pub async fn generate_palettes(&self, premise: &str) -> Result<Vec<Palette>, String> {
-        let session_id = self.fire_event(premise).await?;
-        self.poll_session(&session_id).await
+        let session = self
+            .sf
+            .fire_hook_and_wait(
+                &self.agent_id,
+                "generate_palette",
+                serde_json::json!({ "premise": premise }),
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+
+        extract_palettes(&session.result)
     }
 }
 
-fn extract_palettes(session: &Value) -> Result<Vec<Palette>, String> {
-    let result = session
-        .get("result")
-        .or_else(|| session.get("output"))
-        .or_else(|| session.get("response"));
+fn extract_palettes(result: &Option<serde_json::Value>) -> Result<Vec<Palette>, String> {
+    let result = result
+        .as_ref()
+        .ok_or_else(|| "No result in session".to_string())?;
 
-    if let Some(result) = result {
-        // Try parsing as string first (might be JSON string)
-        if let Some(s) = result.as_str() {
-            if let Ok(palettes) = serde_json::from_str::<Vec<Palette>>(s) {
+    // Try as string (might be JSON string or markdown-wrapped)
+    if let Some(s) = result.as_str() {
+        if let Ok(palettes) = serde_json::from_str::<Vec<Palette>>(s) {
+            return Ok(palettes);
+        }
+        if let Some(json_str) = extract_json_from_text(s) {
+            if let Ok(palettes) = serde_json::from_str::<Vec<Palette>>(&json_str) {
                 return Ok(palettes);
             }
-            // Try extracting JSON from markdown code blocks
-            if let Some(json_str) = extract_json_from_text(s) {
-                if let Ok(palettes) = serde_json::from_str::<Vec<Palette>>(&json_str) {
-                    return Ok(palettes);
-                }
-                // Maybe it's a wrapper object with a palettes field
-                if let Ok(val) = serde_json::from_str::<Value>(&json_str) {
-                    if let Some(palettes_val) = val.get("palettes") {
-                        if let Ok(palettes) =
-                            serde_json::from_value::<Vec<Palette>>(palettes_val.clone())
-                        {
-                            return Ok(palettes);
-                        }
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&json_str) {
+                if let Some(p) = val.get("palettes") {
+                    if let Ok(palettes) = serde_json::from_value::<Vec<Palette>>(p.clone()) {
+                        return Ok(palettes);
                     }
                 }
             }
         }
-        // Try parsing directly as array
-        if let Ok(palettes) = serde_json::from_value::<Vec<Palette>>(result.clone()) {
+    }
+
+    // Try directly as array
+    if let Ok(palettes) = serde_json::from_value::<Vec<Palette>>(result.clone()) {
+        return Ok(palettes);
+    }
+
+    // Try as object with palettes field
+    if let Some(p) = result.get("palettes") {
+        if let Ok(palettes) = serde_json::from_value::<Vec<Palette>>(p.clone()) {
             return Ok(palettes);
         }
-        // Try as object with palettes field
-        if let Some(palettes_val) = result.get("palettes") {
-            if let Ok(palettes) = serde_json::from_value::<Vec<Palette>>(palettes_val.clone()) {
+    }
+
+    // Try summary field (report_result wraps output here)
+    if let Some(summary) = result.get("summary").and_then(|s| s.as_str()) {
+        if let Some(json_str) = extract_json_from_text(summary) {
+            if let Ok(palettes) = serde_json::from_str::<Vec<Palette>>(&json_str) {
                 return Ok(palettes);
+            }
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&json_str) {
+                if let Some(p) = val.get("palettes") {
+                    if let Ok(palettes) = serde_json::from_value::<Vec<Palette>>(p.clone()) {
+                        return Ok(palettes);
+                    }
+                }
             }
         }
     }
@@ -180,24 +90,24 @@ fn extract_palettes(session: &Value) -> Result<Vec<Palette>, String> {
 }
 
 fn extract_json_from_text(text: &str) -> Option<String> {
-    // Look for JSON in ```json ... ``` blocks
+    // ```json ... ```
     if let Some(start) = text.find("```json") {
-        let after_marker = &text[start + 7..];
-        if let Some(end) = after_marker.find("```") {
-            return Some(after_marker[..end].trim().to_string());
+        let after = &text[start + 7..];
+        if let Some(end) = after.find("```") {
+            return Some(after[..end].trim().to_string());
         }
     }
-    // Look for JSON in ``` ... ``` blocks
+    // ``` ... ```
     if let Some(start) = text.find("```") {
-        let after_marker = &text[start + 3..];
-        if let Some(end) = after_marker.find("```") {
-            let content = after_marker[..end].trim();
+        let after = &text[start + 3..];
+        if let Some(end) = after.find("```") {
+            let content = after[..end].trim();
             if content.starts_with('[') || content.starts_with('{') {
                 return Some(content.to_string());
             }
         }
     }
-    // Look for raw JSON array or object
+    // Raw JSON
     if let Some(start) = text.find('[') {
         if let Some(end) = text.rfind(']') {
             return Some(text[start..=end].to_string());
@@ -214,31 +124,11 @@ pub fn mock_palettes(premise: &str) -> Vec<Palette> {
             name: "Sunset Warmth".to_string(),
             mood: "Warm and inviting".to_string(),
             colors: vec![
-                PaletteColor {
-                    hex: "#FF6B35".to_string(),
-                    name: "Tangerine".to_string(),
-                    role: "Primary".to_string(),
-                },
-                PaletteColor {
-                    hex: "#F7C59F".to_string(),
-                    name: "Peach".to_string(),
-                    role: "Secondary".to_string(),
-                },
-                PaletteColor {
-                    hex: "#EFEFD0".to_string(),
-                    name: "Cream".to_string(),
-                    role: "Background".to_string(),
-                },
-                PaletteColor {
-                    hex: "#004E89".to_string(),
-                    name: "Deep Blue".to_string(),
-                    role: "Accent".to_string(),
-                },
-                PaletteColor {
-                    hex: "#1A1A2E".to_string(),
-                    name: "Midnight".to_string(),
-                    role: "Text".to_string(),
-                },
+                PaletteColor { hex: "#FF6B35".into(), name: "Tangerine".into(), role: "Primary".into() },
+                PaletteColor { hex: "#F7C59F".into(), name: "Peach".into(), role: "Secondary".into() },
+                PaletteColor { hex: "#EFEFD0".into(), name: "Cream".into(), role: "Background".into() },
+                PaletteColor { hex: "#004E89".into(), name: "Deep Blue".into(), role: "Accent".into() },
+                PaletteColor { hex: "#1A1A2E".into(), name: "Midnight".into(), role: "Text".into() },
             ],
             use_case: format!("A warm palette inspired by: {}", premise),
         },
@@ -246,31 +136,11 @@ pub fn mock_palettes(premise: &str) -> Vec<Palette> {
             name: "Ocean Depths".to_string(),
             mood: "Calm and mysterious".to_string(),
             colors: vec![
-                PaletteColor {
-                    hex: "#0B3D91".to_string(),
-                    name: "Navy".to_string(),
-                    role: "Primary".to_string(),
-                },
-                PaletteColor {
-                    hex: "#1B98E0".to_string(),
-                    name: "Azure".to_string(),
-                    role: "Secondary".to_string(),
-                },
-                PaletteColor {
-                    hex: "#E8F1F2".to_string(),
-                    name: "Ice".to_string(),
-                    role: "Background".to_string(),
-                },
-                PaletteColor {
-                    hex: "#13293D".to_string(),
-                    name: "Abyss".to_string(),
-                    role: "Accent".to_string(),
-                },
-                PaletteColor {
-                    hex: "#16DB93".to_string(),
-                    name: "Seafoam".to_string(),
-                    role: "Highlight".to_string(),
-                },
+                PaletteColor { hex: "#0B3D91".into(), name: "Navy".into(), role: "Primary".into() },
+                PaletteColor { hex: "#1B98E0".into(), name: "Azure".into(), role: "Secondary".into() },
+                PaletteColor { hex: "#E8F1F2".into(), name: "Ice".into(), role: "Background".into() },
+                PaletteColor { hex: "#13293D".into(), name: "Abyss".into(), role: "Accent".into() },
+                PaletteColor { hex: "#16DB93".into(), name: "Seafoam".into(), role: "Highlight".into() },
             ],
             use_case: format!("A cool palette inspired by: {}", premise),
         },
@@ -278,31 +148,11 @@ pub fn mock_palettes(premise: &str) -> Vec<Palette> {
             name: "Forest Canopy".to_string(),
             mood: "Natural and grounded".to_string(),
             colors: vec![
-                PaletteColor {
-                    hex: "#2D6A4F".to_string(),
-                    name: "Emerald".to_string(),
-                    role: "Primary".to_string(),
-                },
-                PaletteColor {
-                    hex: "#95D5B2".to_string(),
-                    name: "Sage".to_string(),
-                    role: "Secondary".to_string(),
-                },
-                PaletteColor {
-                    hex: "#F0EBD8".to_string(),
-                    name: "Parchment".to_string(),
-                    role: "Background".to_string(),
-                },
-                PaletteColor {
-                    hex: "#8B5E3C".to_string(),
-                    name: "Bark".to_string(),
-                    role: "Accent".to_string(),
-                },
-                PaletteColor {
-                    hex: "#1B4332".to_string(),
-                    name: "Pine".to_string(),
-                    role: "Text".to_string(),
-                },
+                PaletteColor { hex: "#2D6A4F".into(), name: "Emerald".into(), role: "Primary".into() },
+                PaletteColor { hex: "#95D5B2".into(), name: "Sage".into(), role: "Secondary".into() },
+                PaletteColor { hex: "#F0EBD8".into(), name: "Parchment".into(), role: "Background".into() },
+                PaletteColor { hex: "#8B5E3C".into(), name: "Bark".into(), role: "Accent".into() },
+                PaletteColor { hex: "#1B4332".into(), name: "Pine".into(), role: "Text".into() },
             ],
             use_case: format!("An earthy palette inspired by: {}", premise),
         },
