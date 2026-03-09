@@ -39,7 +39,21 @@ fn extract_palettes(result: &Option<serde_json::Value>) -> Result<Vec<Palette>, 
         .as_ref()
         .ok_or_else(|| "No result in session".to_string())?;
 
-    // Try as string (might be JSON string or markdown-wrapped)
+    // Prefer structured_data (report_result's machine-readable output)
+    if let Some(data) = result.get("structured_data") {
+        if !data.is_null() {
+            if let Ok(palettes) = serde_json::from_value::<Vec<Palette>>(data.clone()) {
+                return Ok(palettes);
+            }
+            if let Some(p) = data.get("palettes") {
+                if let Ok(palettes) = serde_json::from_value::<Vec<Palette>>(p.clone()) {
+                    return Ok(palettes);
+                }
+            }
+        }
+    }
+
+    // Fallback: try as string (might be JSON string or markdown-wrapped)
     if let Some(s) = result.as_str() {
         if let Ok(palettes) = serde_json::from_str::<Vec<Palette>>(s) {
             return Ok(palettes);
@@ -70,7 +84,7 @@ fn extract_palettes(result: &Option<serde_json::Value>) -> Result<Vec<Palette>, 
         }
     }
 
-    // Try summary field (report_result wraps output here)
+    // Try summary field (legacy fallback)
     if let Some(summary) = result.get("summary").and_then(|s| s.as_str()) {
         if let Some(json_str) = extract_json_from_text(summary) {
             if let Ok(palettes) = serde_json::from_str::<Vec<Palette>>(&json_str) {

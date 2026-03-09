@@ -61,7 +61,10 @@ Generate 3 unique color palettes inspired by the premise above. Each palette sho
 
 ## Output Format
 
-Respond with ONLY this JSON structure, no other text:
+When you are done, call `report_result` with:
+- `success`: true
+- `summary`: A brief human-readable description of the palettes you generated
+- `structured_data`: The palettes as a JSON object with this exact structure:
 
 {
   "palettes": [
@@ -80,6 +83,8 @@ Respond with ONLY this JSON structure, no other text:
     }
   ]
 }
+
+Do NOT return the JSON as text. You MUST pass it as the `structured_data` parameter of `report_result`.
 
 ## Rules
 
