@@ -1,67 +1,111 @@
-# starflask-miniapps
+# Starflask Miniapps
 
-A collection of niche webapps powered by Starflask (+ Axoniac) as their core AI backend engine.
+A collection of AI-powered web apps built on [Starflask](https://starflask.com). Each one is a working product — and each one is shockingly small, because Starflask handles all the hard parts.
 
-Each app has a Starflask account and API key, and uses Starflask agents to handle AI-powered functionality.
+## Why Starflask
+
+Building an AI agent from scratch means wiring up LLM API calls, implementing a tool-calling loop, managing retries and timeouts, assembling prompts, tracking sessions, parsing structured output, and hoping it all holds together. That's hundreds of lines of infrastructure before you write a single line of product code.
+
+Starflask replaces all of that with one concept: **fire a hook, get a result.**
+
+```rust
+let session = sf.fire_hook_and_wait(
+    &agent_id,
+    "generate_palette",
+    json!({ "premise": "cyberpunk dashboard" }),
+).await?;
+
+// session.result contains structured data from the AI agent
+```
+
+That's the entire AI integration. One function call. Starflask takes care of:
+
+- **Prompt assembly** — Your agent has a soul (who it is) and personas (what it does for each hook event). Starflask assembles the right prompt automatically.
+- **LLM orchestration** — Model selection, API calls, retries, token management. You never touch it.
+- **Agentic loop** — If the agent needs to call tools (report results, make HTTP requests, post to Twitter, etc.), Starflask runs the full tool-call cycle until the agent signals completion.
+- **Session lifecycle** — Every request becomes a tracked session with status, logs, iterations, and results. Debug by looking at the session, not by adding print statements.
+- **Structured output** — Agents return data via `report_result` with a summary and machine-readable `structured_data`. Your app parses JSON, not prose.
+- **Built-in tools** — Twitter, Discord, Google Workspace, HTTP fetch — available to agents based on configured integrations. No tool implementation on your side.
+
+The result: **your app code is just normal app code.** Routes, handlers, UI components. The AI is a service call, not an architecture.
 
 ## Apps
 
-### Swatch Swipe
+### [Swatch Swipe](./apps/swatch-swipe/)
+
 **Tinder for Color Palettes.** Enter a design premise, get AI-generated color palettes, swipe to save your favorites.
 
-- `apps/swatch-swipe/backend/` — Rust/Axum proxy server
-- `apps/swatch-swipe/frontend/` — React/Vite/Tailwind UI
+- Backend: Rust/Axum, ~200 lines of app code
+- Frontend: React/Vite/Tailwind, ~330 lines
+- AI integration: 1 function call (`fire_hook_and_wait`)
 
-#### AI DevOps with Claude Code
+The AI agent is a color theorist persona that understands WCAG contrast ratios, names colors evocatively, and returns structured JSON with hex codes, roles, and mood descriptions. Your app just renders what it gets back.
 
-Agent provisioning is done conversationally through Claude Code. Tell it:
+See the [full walkthrough](./BLOG.md) for a detailed look at the code.
 
-> run seed using starflask api key sk_eb4ba3...
+## The pattern
 
-Claude Code runs the Rust seed binary, which creates the Starflask agent, provisions the pack, and returns output like:
+Every miniapp follows the same structure:
 
 ```
-Seed completed successfully. Agent "Swatch Swipe" is created and provisioned
-with the generate_palette hook at agent ID e3773c98-5e3c-438c-a2e8-062c46377f15
+app/
+├── backend/
+│   └── src/
+│       ├── main.rs          # Server + routes
+│       ├── models.rs         # Your data types (no AI stuff)
+│       ├── handlers.rs       # Normal endpoint handlers
+│       ├── starflask.rs      # fire_hook_and_wait + parse result
+│       └── seed.rs           # One-time agent setup
+└── frontend/
+    └── src/
+        ├── App.tsx           # UI shell
+        ├── api.ts            # HTTP client (hits your backend, not Starflask)
+        └── components/       # Normal React components
 ```
 
-Add the returned agent ID to your backend `.env`:
+The key insight: **the frontend doesn't know AI exists.** It calls your backend API, which returns typed data. Whether that data came from a database, a cache, or an AI agent is an implementation detail hidden behind a normal endpoint.
 
-```env
-STARFLASK_API_URL=https://starflask.com
-STARFLASK_API_KEY=sk_<your key>
-STARFLASK_AGENT_ID=e3773c98-5e3c-438c-a2e8-062c46377f15
-```
+## Getting started
 
-Or run it directly:
+### 1. Seed the agent
+
+Each app has a seed script that provisions its Starflask agent in one command:
 
 ```bash
 cd apps/swatch-swipe/backend
-STARFLASK_API_KEY=sk_... STARFLASK_API_URL=https://starflask.com/api cargo run --bin seed
+STARFLASK_API_KEY=sk_your-key cargo run --bin seed
 ```
 
-#### Quick start
+This creates the agent, uploads its soul prompt and personas, configures hooks, and prints the agent ID for your `.env`.
+
+### 2. Run the backend
 
 ```bash
-# Backend
 cd apps/swatch-swipe/backend
-cp .env.example .env  # fill in credentials from seed output
+cp .env.example .env   # add your API key and agent ID
 cargo run
+```
 
-# Frontend
+### 3. Run the frontend
+
+```bash
 cd apps/swatch-swipe/frontend
 npm install
 npm run dev
 ```
 
-Works in mock mode (no Starflask needed) — just leave STARFLASK_API_URL unset.
+### Mock mode
 
-## Architecture
+Leave `STARFLASK_API_URL` unset and the backend returns mock data. This lets you develop the UI without running Starflask or any AI services.
 
-Each mini-app follows the same pattern:
-- **Frontend**: React + Vite + TypeScript + Tailwind
-- **Backend**: Rust + Axum (thin proxy to Starflask)
-- **AI**: Starflask agent with Axoniac agent pack (soul + persona + hooks)
-- **Seed**: Rust binary (`cargo run --bin seed`) using the `starflask` crate — provisions the agent in one command
+## Tech stack
 
-See [AXONIAC_AGENT_SEED.md](./AXONIAC_AGENT_SEED.md) for how to create new Axoniac agent packs.
+- **Backend:** Rust, Axum, [starflask-rs](https://crates.io/crates/starflask) SDK
+- **Frontend:** React 19, TypeScript, Vite, Tailwind CSS 4
+- **AI platform:** [Starflask](https://starflask.com) + [Axoniac](https://axoniac.com) (agent packs)
+
+## Resources
+
+- [BLOG.md](./BLOG.md) — Deep dive into how Swatch Swipe works and why it's so small
+- [DEVOPS.md](./DEVOPS.md) — Full setup and deployment guide
+- [AXONIAC_AGENT_SEED.md](./AXONIAC_AGENT_SEED.md) — How to create agent packs
