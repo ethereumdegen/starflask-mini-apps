@@ -20,6 +20,7 @@ impl StarflaskClient {
     }
 
     pub async fn generate_palettes(&self, premise: &str) -> Result<Vec<Palette>, String> {
+        tracing::info!(premise = premise, agent_id = %self.agent_id, "Firing generate_palette hook");
         let session = self
             .sf
             .fire_hook_and_wait(
@@ -28,9 +29,20 @@ impl StarflaskClient {
                 serde_json::json!({ "premise": premise }),
             )
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| {
+                tracing::error!(error = %e, "fire_hook_and_wait failed");
+                e.to_string()
+            })?;
 
-        extract_palettes(&session.result)
+        tracing::debug!(session_id = %session.id, status = ?session.status, "Session completed");
+        tracing::trace!(result = ?session.result, "Raw session result");
+
+        let palettes = extract_palettes(&session.result);
+        match &palettes {
+            Ok(p) => tracing::info!(count = p.len(), "Extracted palettes successfully"),
+            Err(e) => tracing::warn!(error = %e, result = ?session.result, "Failed to extract palettes"),
+        }
+        palettes
     }
 }
 

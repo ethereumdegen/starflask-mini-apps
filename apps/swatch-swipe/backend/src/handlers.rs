@@ -21,16 +21,22 @@ pub async fn generate_palette(
         ));
     }
 
+    tracing::info!(premise = %premise, "Generate palette request received");
+
     let palettes = if let Some(ref client) = state.starflask_client {
         client
             .generate_palettes(&premise)
             .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
+            .map_err(|e| {
+                tracing::error!(error = %e, "Palette generation failed");
+                (StatusCode::INTERNAL_SERVER_ERROR, e)
+            })?
     } else {
         tracing::info!("Using mock palettes (no STARFLASK_API_URL configured)");
         starflask::mock_palettes(&premise)
     };
 
+    tracing::info!(count = palettes.len(), "Returning palettes");
     Ok(Json(GenerateResponse { palettes }))
 }
 
